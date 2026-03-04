@@ -1,0 +1,27 @@
+{
+    "name": "Kaseya VSA",
+    "id": "kaseya_vsa_iot",
+    "version": "1.0.0",
+    "mapping": "",
+    "pull_supported": true,
+    "push_supported": false,
+    "description": "Fetch managed endpoints and asset data from Kaseya VSA.",
+    "configuration": [
+        {
+            "label": "Kaseya VSA URL",
+            "key": "base_url",
+            "type": "text",
+            "mandatory": true,
+            "default": "",
+            "description": "URL of Kaseya VSA instance."
+        },
+        {
+            "label": "Username",
+            "key": "username",
+            "type": "text",
+            "mandatory": true,
+            "default": "",
+            "description": "Username for Kaseya VSA instance."
+        }
+    ]
+}
