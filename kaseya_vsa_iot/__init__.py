@@ -1,1 +1,0 @@
-"""Kaseya VSA IoT Plugin."""
