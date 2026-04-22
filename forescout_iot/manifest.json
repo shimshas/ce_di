@@ -8,20 +8,38 @@
     "description": "Fetch REM assets from Forescout Data Exchange v3 API.",
     "configuration": [
         {
-            "label": "Forescout URL",
+            "label": "Base URL",
             "key": "base_url",
             "type": "text",
             "mandatory": true,
             "default": "",
-            "description": "URL of your Forescout platform."
+            "description": "Base URL of Forescout instance. e.g. https://forescout.example.com"
         },
         {
-            "label": "API Key",
-            "key": "api_key",
+            "label": "API Token",
+            "key": "api_token",
             "type": "password",
-            "mandatory": true,
+            "mandatory": false,
             "default": "",
-            "description": "API Key for Forescout."
+            "description": "API Token for Forescout authentication."
+        },
+        {
+            "label": "SSL Validation",
+            "key": "ssl_validation",
+            "type": "choice",
+            "choices": [
+                {
+                    "key": "Enabled",
+                    "value": "true"
+                },
+                {
+                    "key": "Disabled",
+                    "value": "false"
+                }
+            ],
+            "default": "true",
+            "mandatory": true,
+            "description": "Enable or disable SSL certificate validation."
         }
     ]
 }

@@ -434,7 +434,7 @@ class ForescoutPlugin(IotPluginBase):
                             message.
         """
         base_url = configuration.get("base_url", "").strip().strip("/")
-        api_key = configuration.get("api_key")
+        api_token = configuration.get("api_token")
 
         if "base_url" not in configuration or not base_url:
             err_msg = "Forescout URL is a required field."
@@ -455,8 +455,8 @@ class ForescoutPlugin(IotPluginBase):
                 success=False,
                 message="Invalid Forescout URL provided.",
             )
-        if "api_key" not in configuration or not api_key:
-            err_msg = "API Key is a required field."
+        if "api_token" not in configuration or not api_token:
+            err_msg = "API Token is a required field."
             self.logger.error(
                 f"{self.log_prefix}: Validation error occurred. Error: {err_msg}",
                 error_code="IoT_PLUGIN_150003",
@@ -476,10 +476,10 @@ class ForescoutPlugin(IotPluginBase):
             results after making an API call.
         """
         base_url = configuration.get("base_url", "").strip().strip("/")
-        api_key = configuration.get("api_key")
+        api_token = configuration.get("api_token")
         try:
             headers = self._add_user_agent()
-            headers["X-Api-Key"] = api_key
+            headers["Authorization"] = f"Bearer {api_token}"
             response = self._api_helper(
                 lambda: requests.get(
                     url=f"{base_url}/api/data-exchange/v3/rem-assets",
@@ -496,7 +496,7 @@ class ForescoutPlugin(IotPluginBase):
                     success=True, message="Validation successful."
                 )
             elif response.status_code == 401:
-                err_msg = "Invalid API Key provided."
+                err_msg = "Invalid API Token provided."
                 self.logger.error(
                     message=f"{self.log_prefix}: {err_msg}",
                     details=f"Received API response: {response.text}",
@@ -744,7 +744,7 @@ class ForescoutPlugin(IotPluginBase):
             tuple: (assets_list, is_first, is_last, asset_count, vuln_count)
         """
         base_url = self.configuration.get("base_url", "").strip().strip("/")
-        api_key = self.configuration.get("api_key")
+        api_token = self.configuration.get("api_token")
 
         # POST-based pagination with page number (e.g. Forescout)
         import time as _time
@@ -760,7 +760,7 @@ class ForescoutPlugin(IotPluginBase):
 
         is_first, is_last = True, False
         headers = self._add_user_agent()
-        headers["X-Api-Key"] = api_key
+        headers["Authorization"] = f"Bearer {api_token}"
         headers["Content-Type"] = "application/json"
 
         while True:
