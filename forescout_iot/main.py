@@ -727,10 +727,20 @@ class ForescoutPlugin(IotPluginBase):
         current_time_ms = int(_time.time() * 1000)
         lookback_ms = 24 * 60 * 60 * 1000
         page_number = 0
+        # Forescout API requires selected_fields to specify which fields to return
+        selected_fields = [
+            "id",
+            "ip_addresses",
+            "mac_addresses",
+            "rem_category",
+            "rem_vendor",
+            "rem_os",
+        ]
         post_body = {
             "from_utc_millis": current_time_ms - lookback_ms,
             "to_utc_millis": current_time_ms,
             "page_number": page_number,
+            "selected_fields": selected_fields,
         }
 
         is_first, is_last = True, False
@@ -753,13 +763,13 @@ class ForescoutPlugin(IotPluginBase):
                 )
 
                 assets = []
-                for record in response.get("result") or []:
+                for record in response.get("results") or []:
                     asset = self.get_assets(record)
                     if asset:
                         assets.append(asset)
 
                 # Page number POST pagination
-                if not response.get("result"):
+                if not response.get("results"):
                     is_last = True
                     yield assets, is_first, is_last, len(assets), 0
                     break
