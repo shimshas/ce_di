@@ -1,1 +1,0 @@
-"""Forescout IoT Plugin."""
