@@ -480,9 +480,22 @@ class ForescoutPlugin(IotPluginBase):
         try:
             headers = self._add_user_agent()
             headers["Authorization"] = f"Bearer {api_token}"
+            headers["Content-Type"] = "application/json"
+            
+            # Minimal POST body to validate credentials
+            import time as _time
+            current_time_ms = int(_time.time() * 1000)
+            validate_body = {
+                "from_utc_millis": current_time_ms - 60000,  # Last 1 minute
+                "to_utc_millis": current_time_ms,
+                "selected_fields": ["id"],
+                "page_number": 0,
+            }
+            
             response = self._api_helper(
-                lambda: requests.get(
+                lambda: requests.post(
                     url=f"{base_url}/api/data-exchange/v3/rem-assets",
+                    json=validate_body,
                     headers=headers,
                     verify=self.ssl_validation,
                     timeout=DEFAULT_TIMEOUT,
