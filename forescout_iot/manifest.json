@@ -4,22 +4,22 @@
     "version": "1.0.0",
     "mapping": "",
     "pull_supported": true,
-    "push_supported": false,
-    "description": "Fetch REM assets from Forescout Data Exchange v3 API.",
+    "push_supported": true,
+    "description": "Forescout Data Exchange v3 API plugin",
     "configuration": [
         {
-            "label": "Base URL",
+            "label": "Forescout Host",
             "key": "base_url",
             "type": "text",
             "mandatory": true,
             "default": "",
-            "description": "Base URL of Forescout instance. e.g. https://forescout.example.com"
+            "description": "URL of your Forescout platform."
         },
         {
             "label": "API Token",
             "key": "api_token",
             "type": "password",
-            "mandatory": false,
+            "mandatory": true,
             "default": "",
             "description": "API Token for Forescout authentication."
         },

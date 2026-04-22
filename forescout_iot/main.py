@@ -434,7 +434,7 @@ class ForescoutPlugin(IotPluginBase):
                             message.
         """
         base_url = configuration.get("base_url", "").strip().strip("/")
-        api_token = configuration.get("api_token")
+        token = configuration.get("api_token")
 
         if "base_url" not in configuration or not base_url:
             err_msg = "Forescout URL is a required field."
@@ -455,7 +455,7 @@ class ForescoutPlugin(IotPluginBase):
                 success=False,
                 message="Invalid Forescout URL provided.",
             )
-        if "api_token" not in configuration or not api_token:
+        if "api_token" not in configuration or not token:
             err_msg = "API Token is a required field."
             self.logger.error(
                 f"{self.log_prefix}: Validation error occurred. Error: {err_msg}",
@@ -476,27 +476,15 @@ class ForescoutPlugin(IotPluginBase):
             results after making an API call.
         """
         base_url = configuration.get("base_url", "").strip().strip("/")
-        api_token = configuration.get("api_token")
+        token = configuration.get("api_token")
         try:
             headers = self._add_user_agent()
-            headers["Authorization"] = f"Bearer {api_token}"
-            headers["Content-Type"] = "application/json"
-            
-            # Minimal POST body to validate credentials
-            import time as _time
-            current_time_ms = int(_time.time() * 1000)
-            validate_body = {
-                "from_utc_millis": current_time_ms - 60000,  # Last 1 minute
-                "to_utc_millis": current_time_ms,
-                "selected_fields": ["id"],
-                "page_number": 0,
-            }
-            
+            headers["Authorization"] = f"Bearer {token}"
             response = self._api_helper(
                 lambda: requests.post(
                     url=f"{base_url}/api/data-exchange/v3/rem-assets",
-                    json=validate_body,
                     headers=headers,
+                    json={},
                     verify=self.ssl_validation,
                     timeout=DEFAULT_TIMEOUT,
                 ),
@@ -509,7 +497,7 @@ class ForescoutPlugin(IotPluginBase):
                     success=True, message="Validation successful."
                 )
             elif response.status_code == 401:
-                err_msg = "Invalid API Token provided."
+                err_msg = "The session is not valid or expired."
                 self.logger.error(
                     message=f"{self.log_prefix}: {err_msg}",
                     details=f"Received API response: {response.text}",
@@ -604,62 +592,23 @@ class ForescoutPlugin(IotPluginBase):
         asset = None
         try:
 
-            # source_id
-            source_id = self.validate_field(
-                "source_id",
-                record.get("id"),
-                128,
-                invalid_fields,
-            )
-
             # IP address
+            # Simple extraction - take first element from array (no validation)
             ip_address = None
             _ip_raw = record.get("ip_addresses")
             if isinstance(_ip_raw, list) and _ip_raw:
-                _valid_ips = []
-                for _ip_val in _ip_raw:
-                    _ip_str = str(_ip_val).strip() if _ip_val else ""
-                    if _ip_str and self._is_valid_ipv4(_ip_str):
-                        _valid_ips.append(_ip_str)
-                # Prefer private (RFC 1918) IPs over public
-                for _candidate in _valid_ips:
-                    if self._is_private_ipv4(_candidate):
-                        ip_address = _candidate
-                        break
-                if not ip_address and _valid_ips:
-                    ip_address = _valid_ips[0]
+                ip_address = _ip_raw[0] if _ip_raw[0] else None
             elif isinstance(_ip_raw, str) and _ip_raw:
-                if self._is_valid_ipv4(_ip_raw):
-                    ip_address = _ip_raw
-            if not ip_address:
-                invalid_fields.append("ip")
-
-            # tags
-            _tags_raw = record.get("labels")
-            tags = _tags_raw if isinstance(_tags_raw, list) else []
+                ip_address = _ip_raw
 
             # MAC address
+            # Simple extraction - take first element from array (no validation)
             mac_address = None
             _mac_raw = record.get("mac_addresses")
             if isinstance(_mac_raw, list) and _mac_raw:
-                for _mac_val in _mac_raw:
-                    _mac_str = str(_mac_val).strip() if _mac_val else ""
-                    if _mac_str and self.is_valid_mac(_mac_str):
-                        mac_address = _mac_str.upper()
-                        break
+                mac_address = _mac_raw[0] if _mac_raw[0] else None
             elif isinstance(_mac_raw, str) and _mac_raw:
                 mac_address = _mac_raw
-            if not mac_address or not self.is_valid_mac(mac_address):
-                invalid_fields.append("mac_address")
-                mac_address = None
-
-            # category
-            category = self.validate_field(
-                "category",
-                record.get("rem_category"),
-                32,
-                invalid_fields,
-            )
 
             # os
             os = self.validate_field(
@@ -693,6 +642,22 @@ class ForescoutPlugin(IotPluginBase):
                     "manufacturer", manufacturer, 64, invalid_fields
                 )
 
+            # category
+            category = self.validate_field(
+                "category",
+                record.get("rem_category"),
+                32,
+                invalid_fields,
+            )
+
+            # source_id
+            source_id = self.validate_field(
+                "source_id",
+                record.get("id"),
+                128,
+                invalid_fields,
+            )
+
             if invalid_fields:
                 self.logger.warn(
                     f"{self.log_prefix}: Skipping below fields"
@@ -700,16 +665,14 @@ class ForescoutPlugin(IotPluginBase):
                     f"Fields: '{', '.join(invalid_fields)}'."
                 )
             asset = Asset(
-                source_id=source_id or None,
                 ip=ip_address or None,
                 mac_address=mac_address or None,
-                category=category or None,
                 os=os or None,
                 manufacturer=manufacturer or None,
+                category=category or None,
+                source_id=source_id or None,
                 use_asset=True,
             )
-            if tags:
-                asset.tags = tags
         except (ValidationError, Exception) as error:
             err_message = (
                 "Validation error occurred"
@@ -757,7 +720,7 @@ class ForescoutPlugin(IotPluginBase):
             tuple: (assets_list, is_first, is_last, asset_count, vuln_count)
         """
         base_url = self.configuration.get("base_url", "").strip().strip("/")
-        api_token = self.configuration.get("api_token")
+        token = self.configuration.get("api_token")
 
         # POST-based pagination with page number (e.g. Forescout)
         import time as _time
@@ -767,13 +730,12 @@ class ForescoutPlugin(IotPluginBase):
         post_body = {
             "from_utc_millis": current_time_ms - lookback_ms,
             "to_utc_millis": current_time_ms,
-            "selected_fields": ['id', 'ip_addresses', 'labels', 'mac_addresses', 'rem_category', 'rem_os', 'rem_vendor'],
             "page_number": page_number,
         }
 
         is_first, is_last = True, False
         headers = self._add_user_agent()
-        headers["Authorization"] = f"Bearer {api_token}"
+        headers["Authorization"] = f"Bearer {token}"
         headers["Content-Type"] = "application/json"
 
         while True:
@@ -791,13 +753,13 @@ class ForescoutPlugin(IotPluginBase):
                 )
 
                 assets = []
-                for record in response.get("results") or []:
+                for record in response.get("result") or []:
                     asset = self.get_assets(record)
                     if asset:
                         assets.append(asset)
 
                 # Page number POST pagination
-                if not response.get("results"):
+                if not response.get("result"):
                     is_last = True
                     yield assets, is_first, is_last, len(assets), 0
                     break

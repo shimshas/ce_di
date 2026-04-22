@@ -4,3 +4,4 @@
 
 - Initial release.
 - Pull support for fetching assets from Forescout.
+- Push support for sending data to Forescout.
