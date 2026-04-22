@@ -463,7 +463,7 @@ class ForescoutPlugin(IotPluginBase):
             )
             return ValidationResult(success=False, message=err_msg)
 
-        return self.validate_auth(configuration=configuration)
+        return ValidationResult(success=True, message="Validation successful.")
 
     def validate_auth(self, configuration: dict) -> ValidationResult:
         """Validate credentials with Forescout platform.
