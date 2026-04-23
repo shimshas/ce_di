@@ -586,20 +586,29 @@ class ForescoutPlugin(IotPluginBase):
             record (dict): Single record from API response.
 
         Returns:
-            Asset: Asset object created from the record, or None if error.
+            tuple: (Asset, drop_info) where drop_info is dict with reason if dropped, else None.
         """
         invalid_fields = []
         asset = None
+        drop_info = None
         try:
 
             # IP address
             # Simple extraction - take first element from array (no validation)
             ip_address = None
+            original_ip = None
             _ip_raw = record.get("ip_addresses")
             if isinstance(_ip_raw, list) and _ip_raw:
                 ip_address = _ip_raw[0] if _ip_raw[0] else None
             elif isinstance(_ip_raw, str) and _ip_raw:
                 ip_address = _ip_raw
+            original_ip = ip_address
+
+            # Skip IPv6 link-local addresses (fe80::) - use MAC only for these devices
+            fe80_skipped = False
+            if ip_address and ip_address.lower().startswith("fe80:"):
+                ip_address = None
+                fe80_skipped = True
 
             # MAC address
             # Simple extraction - take first element from array (no validation)
@@ -664,6 +673,22 @@ class ForescoutPlugin(IotPluginBase):
                     " due to invalid values. "
                     f"Fields: '{', '.join(invalid_fields)}'."
                 )
+            
+            # Check if device would be dropped (no IP and no MAC)
+            if not ip_address and not mac_address:
+                drop_reason = "No MAC address"
+                if fe80_skipped:
+                    drop_reason = f"IPv6 link-local IP ({original_ip}) skipped and no MAC address"
+                elif not original_ip:
+                    drop_reason = "No IP address and no MAC address"
+                drop_info = {
+                    "source_id": source_id or record.get("id"),
+                    "original_ip": original_ip,
+                    "mac": mac_address,
+                    "reason": drop_reason
+                }
+                return None, drop_info
+            
             asset = Asset(
                 ip=ip_address or None,
                 mac_address=mac_address or None,
@@ -698,7 +723,13 @@ class ForescoutPlugin(IotPluginBase):
                 f"{error_message}{message}. "
                 f"Hence skipping this asset. Error: {error}."
             )
-        return asset
+            drop_info = {
+                "source_id": source_id if 'source_id' in dir() else record.get("id"),
+                "original_ip": original_ip if 'original_ip' in dir() else None,
+                "mac": mac_address if 'mac_address' in dir() else None,
+                "reason": f"{err_message}: {error}"
+            }
+        return asset, drop_info
 
     def get_chunks(self, data, n_chunks):
         """Yield successive n_chunks sized chunks from list of data.
@@ -763,10 +794,28 @@ class ForescoutPlugin(IotPluginBase):
                 )
 
                 assets = []
+                dropped_devices = []
                 for record in response.get("results") or []:
-                    asset = self.get_assets(record)
+                    asset, drop_info = self.get_assets(record)
                     if asset:
                         assets.append(asset)
+                    elif drop_info:
+                        dropped_devices.append(drop_info)
+                
+                # Log dropped devices if any
+                if dropped_devices:
+                    self.logger.info(
+                        f"{self.log_prefix}: {len(dropped_devices)} device(s) "
+                        "dropped from sharing. Details below:"
+                    )
+                    for idx, dropped in enumerate(dropped_devices, 1):
+                        self.logger.info(
+                            f"{self.log_prefix}: Dropped device {idx}: "
+                            f"source_id={dropped.get('source_id', 'N/A')}, "
+                            f"ip={dropped.get('original_ip', 'N/A')}, "
+                            f"mac={dropped.get('mac', 'N/A')}, "
+                            f"reason={dropped.get('reason', 'Unknown')}"
+                        )
 
                 # Page number POST pagination
                 if not response.get("results"):
