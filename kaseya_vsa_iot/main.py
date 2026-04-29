@@ -652,23 +652,23 @@ class KaseyaVSAPlugin(IotPluginBase):
             if not mac_address or not self.is_valid_mac(mac_address):
                 mac_address = None
 
-            # manufacturer (optional — extract from nested structure)
+            # manufacturer — from AssetInfo[CategoryName=System].CategoryData.Manufacturer
+            # Falls back to top-level Type ("windows"/"mac") if AssetInfo is unavailable
             manufacturer = None
-            _mfr_raw = record.get("Type")
             try:
-                if isinstance(_mfr_raw, str) and _mfr_raw.startswith("["):
-                    import ast as _ast
-                    _mfr_raw = _ast.literal_eval(_mfr_raw)
-                if isinstance(_mfr_raw, list):
-                    for _cat in _mfr_raw:
-                        if isinstance(_cat, dict):
-                            _cd = _cat.get("CategoryData") or _cat
-                            _val = _cd.get("Manufacturer") or _cd.get("manufacturer")
-                            if _val:
-                                manufacturer = _val
-                                break
-                elif isinstance(_mfr_raw, str) and _mfr_raw:
-                    manufacturer = _mfr_raw
+                _ai_raw = record.get("AssetInfo") or []
+                for _entry in _ai_raw:
+                    if isinstance(_entry, dict) and _entry.get("CategoryName") == "System":
+                        _cd = _entry.get("CategoryData") or {}
+                        _val = _cd.get("Manufacturer") if isinstance(_cd, dict) else None
+                        if _val:
+                            manufacturer = str(_val)
+                            break
+                # Fallback: use Type field ("windows", "mac")
+                if not manufacturer:
+                    _type_raw = record.get("Type", "")
+                    if _type_raw and isinstance(_type_raw, str):
+                        manufacturer = _type_raw.capitalize()
             except Exception:
                 pass
             if manufacturer:
@@ -753,51 +753,58 @@ class KaseyaVSAPlugin(IotPluginBase):
                 invalid_fields,
             )
 
-            # source_id
+            # source_id — Identifier is the unique UUID for each Kaseya asset
             source_id = self.validate_field(
                 "source_id",
-                record.get("AssetId"),
+                record.get("Identifier"),
                 128,
                 invalid_fields,
             )
 
-            # Log detailed info about invalid fields and their values
+            # Log only fields that were present in the API response but failed validation
+            # (do NOT warn for absent/optional fields that were simply not in the record)
             if invalid_fields:
                 field_details = []
                 for _field_name in invalid_fields:
                     _raw_val = None
                     if _field_name == "hostname":
                         _raw_val = record.get("Name")
-                    if _field_name == "ip":
+                    elif _field_name == "ip":
                         _raw_val = record.get("LocalIpAddresses")
-                    if _field_name == "mac_address":
+                    elif _field_name == "mac_address":
                         _raw_val = record.get("LocalIpAddresses")
-                    if _field_name == "manufacturer":
-                        _raw_val = record.get("Type")
-                    if _field_name == "os":
+                    elif _field_name == "manufacturer":
+                        # Check AssetInfo first, then Type
+                        for _e in (record.get("AssetInfo") or []):
+                            if isinstance(_e, dict) and _e.get("CategoryName") == "System":
+                                _raw_val = (_e.get("CategoryData") or {}).get("Manufacturer")
+                                break
+                        if _raw_val is None:
+                            _raw_val = record.get("Type")
+                    elif _field_name == "os":
                         _raw_val = record.get("Description")
-                    if _field_name == "os_version":
+                    elif _field_name == "os_version":
                         _raw_val = record.get("ClientVersion")
-                    if _field_name == "tags":
+                    elif _field_name == "tags":
                         _raw_val = record.get("Tags")
-                    if _field_name == "category":
+                    elif _field_name == "category":
                         _raw_val = record.get("AssetInfo")
-                    if _field_name == "type":
+                    elif _field_name == "type":
                         _raw_val = record.get("AssetInfo")
-                    if _field_name == "location":
+                    elif _field_name == "location":
                         _raw_val = record.get("GroupName")
-                    if _field_name == "source_id":
-                        _raw_val = record.get("AssetId")
+                    elif _field_name == "source_id":
+                        _raw_val = record.get("Identifier")
+                    # Only warn if the field value was present but failed validation
                     if _raw_val is not None:
                         _val_str = str(_raw_val)[:100]
                         field_details.append(f"{_field_name}={repr(_val_str)}")
-                    else:
-                        field_details.append(f"{_field_name}=None")
-                self.logger.warn(
-                    f"{self.log_prefix}: Skipping fields with invalid values: "
-                    f"{', '.join(field_details)}. "
-                    "Reason: empty, too short (<2 chars), or exceeds max length."
-                )
+                if field_details:
+                    self.logger.warn(
+                        f"{self.log_prefix}: Skipping fields with invalid values: "
+                        f"{', '.join(field_details)}. "
+                        "Reason: too short (<2 chars) or exceeds max length."
+                    )
 
             # Log info if asset has no IP and no MAC (will be non-importable in DI)
             if not ip_address and not mac_address:
