@@ -941,40 +941,10 @@ class KaseyaVSAPlugin(IotPluginBase):
                         f"dropped: {dropped_count}."
                     )
 
-                # Use raw_record_count (API response count) not len(assets) for pagination
-                # to ensure we continue fetching even if some records are dropped
-                if raw_record_count == 0:
-                    # API returned no records - this is the end
-                    # Only yield if this is the first request (no prior yields)
-                    if is_first:
-                        is_last = True
-                        if _duplicate_macs:
-                            self.logger.warn(
-                                f"{self.log_prefix}: Pull complete. Found {len(_duplicate_macs)} "
-                                f"duplicate MAC address(es). Total unique MACs: {len(_seen_macs)}. "
-                                "Duplicate devices will be overwritten in DI (last record wins)."
-                            )
-                        yield assets, is_first, is_last, len(assets), 0
-                    else:
-                        # We've already yielded data - but SDK needs is_last=True to finalize
-                        # Yield a minimal batch with is_last=True to signal completion
-                        is_last = True
-                        if _duplicate_macs:
-                            self.logger.warn(
-                                f"{self.log_prefix}: Pull complete. Found {len(_duplicate_macs)} "
-                                f"duplicate MAC address(es). Total unique MACs: {len(_seen_macs)}. "
-                                "Duplicate devices will be overwritten in DI (last record wins)."
-                            )
-                        self.logger.info(
-                            f"{self.log_prefix}: No more records to fetch. Signaling completion."
-                        )
-                        # Yield empty batch with is_last=True to signal SDK that pull is complete
-                        yield [], is_first, is_last, 0, 0
-                    break
-                elif raw_record_count < LIMIT:
-                    # Partial page - this is the last page with data
+                # Simple offset pagination - check if we got fewer records than LIMIT
+                if raw_record_count < LIMIT:
+                    # This is the last page (partial or empty)
                     is_last = True
-                    # Log duplicate MAC summary at end of pull
                     if _duplicate_macs:
                         self.logger.warn(
                             f"{self.log_prefix}: Pull complete. Found {len(_duplicate_macs)} "
@@ -984,9 +954,10 @@ class KaseyaVSAPlugin(IotPluginBase):
                     yield assets, is_first, is_last, len(assets), 0
                     break
                 else:
+                    # Got full page - more may exist
                     yield assets, is_first, is_last, len(assets), 0
                     is_first = False
-                params["$skip"] += LIMIT
+                    params["$skip"] += LIMIT
 
             except KaseyaVSAException as exp:
                 raise exp
