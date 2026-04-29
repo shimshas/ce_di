@@ -811,24 +811,19 @@ class KaseyaVSAPlugin(IotPluginBase):
                     f"  source_id (Identifier): {source_id or 'None'}"
                 )
 
-            # Build Asset kwargs - only include ip/mac_address when they have values
-            # This ensures assets with only source_id still appear in Non-Importable
-            _asset_kwargs = {
-                "category": category or None,
-                "os_version": os_version or None,
-                "os": os or None,
-                "location": location or None,
-                "source_id": source_id or None,
-                "hostname": hostname or None,
-                "manufacturer": manufacturer or None,
-                "type": device_type or None,
-                "use_asset": True,
-            }
-            if ip_address:
-                _asset_kwargs["ip"] = ip_address
-            if mac_address:
-                _asset_kwargs["mac_address"] = mac_address
-            asset = Asset(**_asset_kwargs)
+            asset = Asset(
+                category=category or None,
+                os_version=os_version or None,
+                os=os or None,
+                location=location or None,
+                source_id=source_id or None,
+                hostname=hostname or None,
+                manufacturer=manufacturer or None,
+                mac_address=mac_address or None,
+                type=device_type or None,
+                use_asset=True,
+                **({"ip": ip_address} if ip_address else {}),
+            )
             if tags:
                 asset.tags = tags
         except (ValidationError, Exception) as error:
