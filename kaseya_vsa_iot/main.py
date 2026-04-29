@@ -805,7 +805,8 @@ class KaseyaVSAPlugin(IotPluginBase):
                 record_id = record.get("Identifier") or record.get("id") or record.get("Name") or "unknown"
                 self.logger.info(
                     f"{self.log_prefix}: Record '{record_id}' has no valid IP or MAC address. "
-                    "This asset will appear in the 'Non-Importable' section in DI (has source_id for tracking). "
+                    "This asset cannot be imported into DI (requires at least an IP or MAC). "
+                    "It will be logged here but will not appear in the DI inventory or Non-Importable section. "
                     f"Raw IP field ('LocalIpAddresses'): {repr(str(record.get('LocalIpAddresses', ''))[:80])}. "
                     f"Raw MAC field ('LocalIpAddresses'): {repr(str(record.get('LocalIpAddresses', ''))[:80])}.\n"
                     f"  source_id (Identifier): {source_id or 'None'}"
@@ -817,12 +818,12 @@ class KaseyaVSAPlugin(IotPluginBase):
                 os=os or None,
                 location=location or None,
                 source_id=source_id or None,
+                ip=ip_address or None,
                 hostname=hostname or None,
                 manufacturer=manufacturer or None,
                 mac_address=mac_address or None,
                 type=device_type or None,
                 use_asset=True,
-                **({"ip": ip_address} if ip_address else {}),
             )
             if tags:
                 asset.tags = tags
