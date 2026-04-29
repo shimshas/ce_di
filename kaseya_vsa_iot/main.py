@@ -705,11 +705,22 @@ class KaseyaVSAPlugin(IotPluginBase):
             if isinstance(_mac_raw, list):
                 for _iface in _mac_raw:
                     _mac_val = _iface.get("PhysicalAddress", "")
+                    # Handle both raw hex (12 chars) and colon-formatted (17 chars) MACs
                     if _mac_val and len(_mac_val) == 12:
-                        mac_address = ":".join(
-                            _mac_val[i:i+2] for i in range(0, 12, 2)
-                        )
-                        break
+                        # Raw hex format: 708cf2b56415 -> 70:8C:F2:B5:64:15
+                        try:
+                            int(_mac_val, 16)
+                            mac_address = ":".join(
+                                _mac_val[i:i+2] for i in range(0, 12, 2)
+                            ).upper()
+                            break
+                        except ValueError:
+                            continue
+                    elif _mac_val and len(_mac_val) == 17 and _mac_val.count(":") == 5:
+                        # Already colon-formatted: 70:8c:f2:b5:64:15
+                        if self.is_valid_mac(_mac_val):
+                            mac_address = _mac_val.upper()
+                            break
             elif isinstance(_mac_raw, str):
                 mac_address = _mac_raw
             if not mac_address or not self.is_valid_mac(mac_address):
@@ -895,7 +906,9 @@ class KaseyaVSAPlugin(IotPluginBase):
                         f"dropped: {dropped_count}."
                     )
 
-                if len(assets) < LIMIT:
+                # Use raw_record_count (API response count) not len(assets) for pagination
+                # to ensure we continue fetching even if some records are dropped
+                if raw_record_count < LIMIT:
                     is_last = True
                     yield assets, is_first, is_last, len(assets), 0
                     break
