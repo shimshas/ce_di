@@ -5,6 +5,7 @@ import time
 import traceback
 import ipaddress
 import requests
+from requests.auth import HTTPBasicAuth
 from datetime import datetime, timezone
 from requests.auth import HTTPBasicAuth
 from typing import Dict
@@ -637,14 +638,6 @@ class KaseyaVSAPlugin(IotPluginBase):
                 invalid_fields,
             )
 
-            # source_id
-            source_id = self.validate_field(
-                "source_id",
-                record.get("Identifier"),
-                128,
-                invalid_fields,
-            )
-
             # IP address
             ip_address = None
             _ip_raw = record.get("LocalIpAddresses")
@@ -667,6 +660,8 @@ class KaseyaVSAPlugin(IotPluginBase):
                         break
                 if not ip_address and _all_ips:
                     ip_address = _all_ips[0]
+            if not ip_address:
+                invalid_fields.append("ip")
 
             # hostname
             hostname = self.validate_field(
@@ -729,6 +724,7 @@ class KaseyaVSAPlugin(IotPluginBase):
             elif isinstance(_mac_raw, str):
                 mac_address = _mac_raw
             if not mac_address or not self.is_valid_mac(mac_address):
+                invalid_fields.append("mac_address")
                 mac_address = None
 
             # type
@@ -774,8 +770,6 @@ class KaseyaVSAPlugin(IotPluginBase):
                         _raw_val = record.get("Description")
                     if _field_name == "location":
                         _raw_val = record.get("GroupName")
-                    if _field_name == "source_id":
-                        _raw_val = record.get("Identifier")
                     if _field_name == "ip":
                         _raw_val = record.get("LocalIpAddresses")
                     if _field_name == "hostname":
@@ -804,8 +798,7 @@ class KaseyaVSAPlugin(IotPluginBase):
                 record_id = record.get("Identifier") or record.get("id") or record.get("Name") or "unknown"
                 self.logger.info(
                     f"{self.log_prefix}: Record '{record_id}' has no valid IP or MAC address. "
-                    "This asset cannot be imported into DI (requires at least an IP or MAC). "
-                    "It will be logged here but will not appear in the DI inventory or Non-Importable section. "
+                    "This asset will appear in the 'Non-Importable' section in DI. "
                     f"Raw IP field ('LocalIpAddresses'): {repr(str(record.get('LocalIpAddresses', ''))[:80])}. "
                     f"Raw MAC field ('LocalIpAddresses'): {repr(str(record.get('LocalIpAddresses', ''))[:80])}."
                 )
@@ -815,7 +808,6 @@ class KaseyaVSAPlugin(IotPluginBase):
                 os_version=os_version or None,
                 os=os or None,
                 location=location or None,
-                source_id=source_id or None,
                 ip=ip_address or None,
                 hostname=hostname or None,
                 manufacturer=manufacturer or None,
@@ -836,15 +828,8 @@ class KaseyaVSAPlugin(IotPluginBase):
                 "creating asset for record"
             )
             message = ""
-            if mac_address and source_id:
-                message = (
-                    f" with mac_address: {mac_address} "
-                    f"and source_id: {source_id}"
-                )
-            elif mac_address:
+            if mac_address:
                 message = f" with mac_address: {mac_address}"
-            elif source_id:
-                message = f" with source_id: {source_id}"
 
             self.logger.warn(
                 f"{error_message}{message}. "
