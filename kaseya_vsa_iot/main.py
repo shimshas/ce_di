@@ -793,16 +793,15 @@ class KaseyaVSAPlugin(IotPluginBase):
                     "Reason: empty, too short (<2 chars), or exceeds max length."
                 )
 
-            # Check if asset can be created (needs at least IP or MAC)
+            # Log info if asset has no IP and no MAC (will be non-importable in DI)
             if not ip_address and not mac_address:
-                # Log the dropped record with identifier details
                 record_id = record.get("Identifier") or record.get("id") or record.get("Name") or "unknown"
-                self.logger.warn(
-                    f"{self.log_prefix}: Dropping record '{record_id}' - "
-                    "no valid IP address or MAC address available. "
-                    "No MAC field configured."
+                self.logger.info(
+                    f"{self.log_prefix}: Record '{record_id}' has no valid IP or MAC address. "
+                    "This asset will appear in the 'Non-Importable' section in DI. "
+                    f"Raw IP field ('LocalIpAddresses'): {repr(str(record.get('LocalIpAddresses', ''))[:80])}. "
+                    f"Raw MAC field ('LocalIpAddresses'): {repr(str(record.get('LocalIpAddresses', ''))[:80])}."
                 )
-                return None
 
             asset = Asset(
                 category=category or None,
@@ -870,6 +869,9 @@ class KaseyaVSAPlugin(IotPluginBase):
         }
 
         is_first, is_last = True, False
+        # Track MAC addresses to detect duplicates across pages
+        _seen_macs = {}
+        _duplicate_macs = []
         headers = self._add_user_agent()
 
         while True:
@@ -893,6 +895,24 @@ class KaseyaVSAPlugin(IotPluginBase):
                 for record in response.get("Data") or []:
                     asset = self.get_assets(record)
                     if asset:
+                        # Check for duplicate MAC addresses
+                        if asset.mac_address:
+                            mac_lower = asset.mac_address.lower()
+                            if mac_lower in _seen_macs:
+                                prev_hostname = _seen_macs[mac_lower]
+                                _duplicate_macs.append({
+                                    'mac': asset.mac_address,
+                                    'hostname1': prev_hostname,
+                                    'hostname2': asset.hostname or 'Unknown'
+                                })
+                                self.logger.warn(
+                                    f"{self.log_prefix}: Duplicate MAC address detected: "
+                                    f"{asset.mac_address}. Previously seen for '{prev_hostname}', "
+                                    f"now also found for '{asset.hostname or 'Unknown'}'. "
+                                    "DI will keep only the last record with this MAC."
+                                )
+                            else:
+                                _seen_macs[mac_lower] = asset.hostname or 'Unknown'
                         assets.append(asset)
                     else:
                         dropped_count += 1
@@ -910,6 +930,13 @@ class KaseyaVSAPlugin(IotPluginBase):
                 # to ensure we continue fetching even if some records are dropped
                 if raw_record_count < LIMIT:
                     is_last = True
+                    # Log duplicate MAC summary at end of pull
+                    if _duplicate_macs:
+                        self.logger.warn(
+                            f"{self.log_prefix}: Pull complete. Found {len(_duplicate_macs)} "
+                            f"duplicate MAC address(es). Total unique MACs: {len(_seen_macs)}. "
+                            "Duplicate devices will be overwritten in DI (last record wins)."
+                        )
                     yield assets, is_first, is_last, len(assets), 0
                     break
                 else:
