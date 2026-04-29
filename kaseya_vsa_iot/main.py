@@ -5,7 +5,6 @@ import time
 import traceback
 import ipaddress
 import requests
-from requests.auth import HTTPBasicAuth
 from datetime import datetime, timezone
 from requests.auth import HTTPBasicAuth
 from typing import Dict
@@ -595,45 +594,10 @@ class KaseyaVSAPlugin(IotPluginBase):
         asset = None
         try:
 
-            # category
-            category = None
-            _cat_info_raw = record.get("AssetInfo")
-            try:
-                if isinstance(_cat_info_raw, str) and _cat_info_raw.startswith("["):
-                    import ast as _ast
-                    _cat_info_raw = _ast.literal_eval(_cat_info_raw)
-                if isinstance(_cat_info_raw, list):
-                    for _entry in _cat_info_raw:
-                        if isinstance(_entry, dict):
-                            _val = _entry.get("CategoryName")
-                            if _val:
-                                category = str(_val)
-                                break
-            except Exception:
-                pass
-            if category:
-                category = self.validate_field("category", category, 32, invalid_fields)
-
-            # os_version
-            os_version = self.validate_field(
-                "os_version",
-                record.get("ClientVersion"),
-                128,
-                invalid_fields,
-            )
-
-            # os
-            os = self.validate_field(
-                "os",
-                record.get("Description"),
-                128,
-                invalid_fields,
-            )
-
-            # location
-            location = self.validate_field(
-                "location",
-                record.get("GroupName"),
+            # hostname
+            hostname = self.validate_field(
+                "hostname",
+                record.get("Name"),
                 256,
                 invalid_fields,
             )
@@ -660,44 +624,6 @@ class KaseyaVSAPlugin(IotPluginBase):
                         break
                 if not ip_address and _all_ips:
                     ip_address = _all_ips[0]
-            if not ip_address:
-                invalid_fields.append("ip")
-
-            # hostname
-            hostname = self.validate_field(
-                "hostname",
-                record.get("Name"),
-                256,
-                invalid_fields,
-            )
-
-            # tags
-            _tags_raw = record.get("Tags")
-            tags = _tags_raw if isinstance(_tags_raw, list) else []
-
-            # manufacturer (optional — extract from nested structure)
-            manufacturer = None
-            _mfr_raw = record.get("Type")
-            try:
-                if isinstance(_mfr_raw, str) and _mfr_raw.startswith("["):
-                    import ast as _ast
-                    _mfr_raw = _ast.literal_eval(_mfr_raw)
-                if isinstance(_mfr_raw, list):
-                    for _cat in _mfr_raw:
-                        if isinstance(_cat, dict):
-                            _cd = _cat.get("CategoryData") or _cat
-                            _val = _cd.get("Manufacturer") or _cd.get("manufacturer")
-                            if _val:
-                                manufacturer = _val
-                                break
-                elif isinstance(_mfr_raw, str) and _mfr_raw:
-                    manufacturer = _mfr_raw
-            except Exception:
-                pass
-            if manufacturer:
-                manufacturer = self.validate_field(
-                    "manufacturer", manufacturer, 64, invalid_fields
-                )
 
             # MAC address
             mac_address = None
@@ -724,8 +650,70 @@ class KaseyaVSAPlugin(IotPluginBase):
             elif isinstance(_mac_raw, str):
                 mac_address = _mac_raw
             if not mac_address or not self.is_valid_mac(mac_address):
-                invalid_fields.append("mac_address")
                 mac_address = None
+
+            # manufacturer (optional — extract from nested structure)
+            manufacturer = None
+            _mfr_raw = record.get("Type")
+            try:
+                if isinstance(_mfr_raw, str) and _mfr_raw.startswith("["):
+                    import ast as _ast
+                    _mfr_raw = _ast.literal_eval(_mfr_raw)
+                if isinstance(_mfr_raw, list):
+                    for _cat in _mfr_raw:
+                        if isinstance(_cat, dict):
+                            _cd = _cat.get("CategoryData") or _cat
+                            _val = _cd.get("Manufacturer") or _cd.get("manufacturer")
+                            if _val:
+                                manufacturer = _val
+                                break
+                elif isinstance(_mfr_raw, str) and _mfr_raw:
+                    manufacturer = _mfr_raw
+            except Exception:
+                pass
+            if manufacturer:
+                manufacturer = self.validate_field(
+                    "manufacturer", manufacturer, 64, invalid_fields
+                )
+
+            # os
+            os = self.validate_field(
+                "os",
+                record.get("Description"),
+                128,
+                invalid_fields,
+            )
+
+            # os_version
+            os_version = self.validate_field(
+                "os_version",
+                record.get("ClientVersion"),
+                128,
+                invalid_fields,
+            )
+
+            # tags
+            _tags_raw = record.get("Tags")
+            tags = _tags_raw if isinstance(_tags_raw, list) else []
+
+            # category
+            category = None
+            _cat_info_raw = record.get("AssetInfo")
+            try:
+                if isinstance(_cat_info_raw, str) and _cat_info_raw.startswith("["):
+                    import ast as _ast
+                    _cat_info_raw = _ast.literal_eval(_cat_info_raw)
+                if isinstance(_cat_info_raw, list):
+                    for _entry in _cat_info_raw:
+                        if isinstance(_entry, dict):
+                            _val = _entry.get("CategoryName")
+                            if _val:
+                                category = str(_val)
+                                break
+            except Exception:
+                pass
+            if category:
+                category = self.validate_field("category", category, 32, invalid_fields)
 
             # type
             device_type = None
@@ -757,31 +745,49 @@ class KaseyaVSAPlugin(IotPluginBase):
             if device_type:
                 device_type = self.validate_field("type", device_type, 32, invalid_fields)
 
+            # location
+            location = self.validate_field(
+                "location",
+                record.get("GroupName"),
+                256,
+                invalid_fields,
+            )
+
+            # source_id
+            source_id = self.validate_field(
+                "source_id",
+                record.get("Identifier"),
+                128,
+                invalid_fields,
+            )
+
             # Log detailed info about invalid fields and their values
             if invalid_fields:
                 field_details = []
                 for _field_name in invalid_fields:
                     _raw_val = None
-                    if _field_name == "category":
-                        _raw_val = record.get("AssetInfo")
-                    if _field_name == "os_version":
-                        _raw_val = record.get("ClientVersion")
-                    if _field_name == "os":
-                        _raw_val = record.get("Description")
-                    if _field_name == "location":
-                        _raw_val = record.get("GroupName")
-                    if _field_name == "ip":
-                        _raw_val = record.get("LocalIpAddresses")
                     if _field_name == "hostname":
                         _raw_val = record.get("Name")
-                    if _field_name == "tags":
-                        _raw_val = record.get("Tags")
-                    if _field_name == "manufacturer":
-                        _raw_val = record.get("Type")
+                    if _field_name == "ip":
+                        _raw_val = record.get("LocalIpAddresses")
                     if _field_name == "mac_address":
                         _raw_val = record.get("LocalIpAddresses")
+                    if _field_name == "manufacturer":
+                        _raw_val = record.get("Type")
+                    if _field_name == "os":
+                        _raw_val = record.get("Description")
+                    if _field_name == "os_version":
+                        _raw_val = record.get("ClientVersion")
+                    if _field_name == "tags":
+                        _raw_val = record.get("Tags")
+                    if _field_name == "category":
+                        _raw_val = record.get("AssetInfo")
                     if _field_name == "type":
                         _raw_val = record.get("AssetInfo")
+                    if _field_name == "location":
+                        _raw_val = record.get("GroupName")
+                    if _field_name == "source_id":
+                        _raw_val = record.get("Identifier")
                     if _raw_val is not None:
                         _val_str = str(_raw_val)[:100]
                         field_details.append(f"{_field_name}={repr(_val_str)}")
@@ -798,21 +804,23 @@ class KaseyaVSAPlugin(IotPluginBase):
                 record_id = record.get("Identifier") or record.get("id") or record.get("Name") or "unknown"
                 self.logger.info(
                     f"{self.log_prefix}: Record '{record_id}' has no valid IP or MAC address. "
-                    "This asset will appear in the 'Non-Importable' section in DI. "
+                    "This asset cannot be imported into DI (requires at least an IP or MAC). "
+                    "It will be logged here but will not appear in the DI inventory or Non-Importable section. "
                     f"Raw IP field ('LocalIpAddresses'): {repr(str(record.get('LocalIpAddresses', ''))[:80])}. "
                     f"Raw MAC field ('LocalIpAddresses'): {repr(str(record.get('LocalIpAddresses', ''))[:80])}."
                 )
 
             asset = Asset(
-                category=category or None,
-                os_version=os_version or None,
-                os=os or None,
-                location=location or None,
-                ip=ip_address or None,
                 hostname=hostname or None,
-                manufacturer=manufacturer or None,
+                ip=ip_address or None,
                 mac_address=mac_address or None,
+                manufacturer=manufacturer or None,
+                os=os or None,
+                os_version=os_version or None,
+                category=category or None,
                 type=device_type or None,
+                location=location or None,
+                source_id=source_id or None,
                 use_asset=True,
             )
             if tags:
@@ -828,8 +836,15 @@ class KaseyaVSAPlugin(IotPluginBase):
                 "creating asset for record"
             )
             message = ""
-            if mac_address:
+            if mac_address and source_id:
+                message = (
+                    f" with mac_address: {mac_address} "
+                    f"and source_id: {source_id}"
+                )
+            elif mac_address:
                 message = f" with mac_address: {mac_address}"
+            elif source_id:
+                message = f" with source_id: {source_id}"
 
             self.logger.warn(
                 f"{error_message}{message}. "
@@ -928,7 +943,36 @@ class KaseyaVSAPlugin(IotPluginBase):
 
                 # Use raw_record_count (API response count) not len(assets) for pagination
                 # to ensure we continue fetching even if some records are dropped
-                if raw_record_count < LIMIT:
+                if raw_record_count == 0:
+                    # API returned no records - this is the end
+                    # Only yield if this is the first request (no prior yields)
+                    if is_first:
+                        is_last = True
+                        if _duplicate_macs:
+                            self.logger.warn(
+                                f"{self.log_prefix}: Pull complete. Found {len(_duplicate_macs)} "
+                                f"duplicate MAC address(es). Total unique MACs: {len(_seen_macs)}. "
+                                "Duplicate devices will be overwritten in DI (last record wins)."
+                            )
+                        yield assets, is_first, is_last, len(assets), 0
+                    else:
+                        # We've already yielded data - but SDK needs is_last=True to finalize
+                        # Yield a minimal batch with is_last=True to signal completion
+                        is_last = True
+                        if _duplicate_macs:
+                            self.logger.warn(
+                                f"{self.log_prefix}: Pull complete. Found {len(_duplicate_macs)} "
+                                f"duplicate MAC address(es). Total unique MACs: {len(_seen_macs)}. "
+                                "Duplicate devices will be overwritten in DI (last record wins)."
+                            )
+                        self.logger.info(
+                            f"{self.log_prefix}: No more records to fetch. Signaling completion."
+                        )
+                        # Yield empty batch with is_last=True to signal SDK that pull is complete
+                        yield [], is_first, is_last, 0, 0
+                    break
+                elif raw_record_count < LIMIT:
+                    # Partial page - this is the last page with data
                     is_last = True
                     # Log duplicate MAC summary at end of pull
                     if _duplicate_macs:
