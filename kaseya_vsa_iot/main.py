@@ -668,8 +668,6 @@ class KaseyaVSAPlugin(IotPluginBase):
                         break
                 if not ip_address and _all_ips:
                     ip_address = _all_ips[0]
-            if not ip_address:
-                invalid_fields.append("ip")
 
             # hostname
             hostname = self.validate_field(
@@ -732,7 +730,6 @@ class KaseyaVSAPlugin(IotPluginBase):
             elif isinstance(_mac_raw, str):
                 mac_address = _mac_raw
             if not mac_address or not self.is_valid_mac(mac_address):
-                invalid_fields.append("mac_address")
                 mac_address = None
 
             # type
@@ -808,24 +805,30 @@ class KaseyaVSAPlugin(IotPluginBase):
                 record_id = record.get("Identifier") or record.get("id") or record.get("Name") or "unknown"
                 self.logger.info(
                     f"{self.log_prefix}: Record '{record_id}' has no valid IP or MAC address. "
-                    "This asset will appear in the 'Non-Importable' section in DI. "
+                    "This asset will appear in the 'Non-Importable' section in DI (has source_id for tracking). "
                     f"Raw IP field ('LocalIpAddresses'): {repr(str(record.get('LocalIpAddresses', ''))[:80])}. "
-                    f"Raw MAC field ('LocalIpAddresses'): {repr(str(record.get('LocalIpAddresses', ''))[:80])}."
+                    f"Raw MAC field ('LocalIpAddresses'): {repr(str(record.get('LocalIpAddresses', ''))[:80])}.\n"
+                    f"  source_id (Identifier): {source_id or 'None'}"
                 )
 
-            asset = Asset(
-                category=category or None,
-                os_version=os_version or None,
-                os=os or None,
-                location=location or None,
-                source_id=source_id or None,
-                ip=ip_address or None,
-                hostname=hostname or None,
-                manufacturer=manufacturer or None,
-                mac_address=mac_address or None,
-                type=device_type or None,
-                use_asset=True,
-            )
+            # Build Asset kwargs - only include ip/mac_address when they have values
+            # This ensures assets with only source_id still appear in Non-Importable
+            _asset_kwargs = {
+                "category": category or None,
+                "os_version": os_version or None,
+                "os": os or None,
+                "location": location or None,
+                "source_id": source_id or None,
+                "hostname": hostname or None,
+                "manufacturer": manufacturer or None,
+                "type": device_type or None,
+                "use_asset": True,
+            }
+            if ip_address:
+                _asset_kwargs["ip"] = ip_address
+            if mac_address:
+                _asset_kwargs["mac_address"] = mac_address
+            asset = Asset(**_asset_kwargs)
             if tags:
                 asset.tags = tags
         except (ValidationError, Exception) as error:
