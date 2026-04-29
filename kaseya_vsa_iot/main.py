@@ -483,11 +483,39 @@ class KaseyaVSAPlugin(IotPluginBase):
             )
 
             if response.status_code == 200:
+                # Verify response contains expected data structure
+                try:
+                    resp_data = response.json()
+                    if not isinstance(resp_data, dict):
+                        err_msg = (
+                            "Invalid response format from Kaseya VSA. "
+                            "Please verify the URL is correct."
+                        )
+                        self.logger.error(
+                            message=f"{self.log_prefix}: {err_msg}",
+                            details=f"Expected JSON object, got: {type(resp_data).__name__}",
+                            error_code="IoT_PLUGIN_150026",
+                        )
+                        return ValidationResult(success=False, message=err_msg)
+                except json.JSONDecodeError:
+                    err_msg = (
+                        "Invalid response from Kaseya VSA. "
+                        "The URL may be incorrect or the API endpoint is not accessible."
+                    )
+                    self.logger.error(
+                        message=f"{self.log_prefix}: {err_msg}",
+                        details=f"Response is not valid JSON: {response.text[:500]}",
+                        error_code="IoT_PLUGIN_150027",
+                    )
+                    return ValidationResult(success=False, message=err_msg)
                 return ValidationResult(
                     success=True, message="Validation successful."
                 )
             elif response.status_code == 401:
-                err_msg = "Invalid Username or Password provided."
+                err_msg = (
+                    "Invalid API Credentials provided. "
+                    "Verify the API key and secret are correct."
+                )
                 self.logger.error(
                     message=f"{self.log_prefix}: {err_msg}",
                     details=f"Received API response: {response.text}",
@@ -496,8 +524,8 @@ class KaseyaVSAPlugin(IotPluginBase):
                 return ValidationResult(success=False, message=err_msg)
             elif response.status_code == 403:
                 err_msg = (
-                    "The user does not have sufficient rights "
-                    "to configure plugin."
+                    "Access denied. The API credentials do not have "
+                    "sufficient permissions to access this endpoint."
                 )
                 self.logger.error(
                     message=f"{self.log_prefix}: {err_msg}",
@@ -506,7 +534,10 @@ class KaseyaVSAPlugin(IotPluginBase):
                 )
                 return ValidationResult(success=False, message=err_msg)
             elif response.status_code == 404:
-                err_msg = "Invalid Kaseya VSA URL provided."
+                err_msg = (
+                    "Invalid Kaseya VSA URL or endpoint. "
+                    "Please verify the URL is correct."
+                )
                 self.logger.error(
                     message=f"{self.log_prefix}: {err_msg}",
                     details=f"Received API response: {response.text}",
@@ -515,7 +546,7 @@ class KaseyaVSAPlugin(IotPluginBase):
                 return ValidationResult(success=False, message=err_msg)
             else:
                 err_msg = (
-                    "Validation error occurred. "
+                    f"Validation failed with status code {response.status_code}. "
                     "Check logs for more details."
                 )
                 self.logger.error(
@@ -564,29 +595,24 @@ class KaseyaVSAPlugin(IotPluginBase):
         asset = None
         try:
 
-            # manufacturer (optional — extract from nested structure)
-            manufacturer = None
-            _mfr_raw = record.get("AssetInfo")
+            # category
+            category = None
+            _cat_info_raw = record.get("AssetInfo")
             try:
-                if isinstance(_mfr_raw, str) and _mfr_raw.startswith("["):
+                if isinstance(_cat_info_raw, str) and _cat_info_raw.startswith("["):
                     import ast as _ast
-                    _mfr_raw = _ast.literal_eval(_mfr_raw)
-                if isinstance(_mfr_raw, list):
-                    for _cat in _mfr_raw:
-                        if isinstance(_cat, dict):
-                            _cd = _cat.get("CategoryData") or _cat
-                            _val = _cd.get("Manufacturer") or _cd.get("manufacturer")
+                    _cat_info_raw = _ast.literal_eval(_cat_info_raw)
+                if isinstance(_cat_info_raw, list):
+                    for _entry in _cat_info_raw:
+                        if isinstance(_entry, dict):
+                            _val = _entry.get("CategoryName")
                             if _val:
-                                manufacturer = _val
+                                category = str(_val)
                                 break
-                elif isinstance(_mfr_raw, str) and _mfr_raw:
-                    manufacturer = _mfr_raw
             except Exception:
                 pass
-            if manufacturer:
-                manufacturer = self.validate_field(
-                    "manufacturer", manufacturer, 64, invalid_fields
-                )
+            if category:
+                category = self.validate_field("category", category, 32, invalid_fields)
 
             # os_version
             os_version = self.validate_field(
@@ -610,20 +636,6 @@ class KaseyaVSAPlugin(IotPluginBase):
                 record.get("GroupName"),
                 256,
                 invalid_fields,
-            )
-
-            # source_id
-            source_id = self.validate_field(
-                "source_id",
-                record.get("Identifier"),
-                128,
-                invalid_fields,
-            )
-
-            # lastseen (timestamp)
-            lastseen = record.get("LastSeenOnline")
-            lastseen = self.is_valid_timestamp(
-                lastseen, "%Y-%m-%dT%H:%M:%S", invalid_fields, "lastseen"
             )
 
             # IP address
@@ -663,13 +675,29 @@ class KaseyaVSAPlugin(IotPluginBase):
             _tags_raw = record.get("Tags")
             tags = _tags_raw if isinstance(_tags_raw, list) else []
 
-            # type
-            device_type = self.validate_field(
-                "type",
-                record.get("Type"),
-                32,
-                invalid_fields,
-            )
+            # manufacturer (optional — extract from nested structure)
+            manufacturer = None
+            _mfr_raw = record.get("Type")
+            try:
+                if isinstance(_mfr_raw, str) and _mfr_raw.startswith("["):
+                    import ast as _ast
+                    _mfr_raw = _ast.literal_eval(_mfr_raw)
+                if isinstance(_mfr_raw, list):
+                    for _cat in _mfr_raw:
+                        if isinstance(_cat, dict):
+                            _cd = _cat.get("CategoryData") or _cat
+                            _val = _cd.get("Manufacturer") or _cd.get("manufacturer")
+                            if _val:
+                                manufacturer = _val
+                                break
+                elif isinstance(_mfr_raw, str) and _mfr_raw:
+                    manufacturer = _mfr_raw
+            except Exception:
+                pass
+            if manufacturer:
+                manufacturer = self.validate_field(
+                    "manufacturer", manufacturer, 64, invalid_fields
+                )
 
             # MAC address
             mac_address = None
@@ -688,23 +716,93 @@ class KaseyaVSAPlugin(IotPluginBase):
                 invalid_fields.append("mac_address")
                 mac_address = None
 
+            # type
+            device_type = None
+            _type_info_raw = record.get("AssetInfo")
+            try:
+                if isinstance(_type_info_raw, str) and _type_info_raw.startswith("["):
+                    import ast as _ast
+                    _type_info_raw = _ast.literal_eval(_type_info_raw)
+                if isinstance(_type_info_raw, list):
+                    # First, try to find the "System" category for device type
+                    for _entry in _type_info_raw:
+                        if isinstance(_entry, dict) and _entry.get("CategoryName") == "System":
+                            _cd = _entry.get("CategoryData") or {}
+                            _val = _cd.get("Type") if isinstance(_cd, dict) else None
+                            if _val:
+                                device_type = str(_val)
+                                break
+                    # Fallback: try any entry with the value
+                    if not device_type:
+                        for _entry in _type_info_raw:
+                            if isinstance(_entry, dict):
+                                _cd = _entry.get("CategoryData") or {}
+                                _val = _cd.get("Type") if isinstance(_cd, dict) else None
+                                if _val:
+                                    device_type = str(_val)
+                                    break
+            except Exception:
+                pass
+            if device_type:
+                device_type = self.validate_field("type", device_type, 32, invalid_fields)
+
+            # Log detailed info about invalid fields and their values
             if invalid_fields:
+                field_details = []
+                for _field_name in invalid_fields:
+                    _raw_val = None
+                    if _field_name == "category":
+                        _raw_val = record.get("AssetInfo")
+                    if _field_name == "os_version":
+                        _raw_val = record.get("ClientVersion")
+                    if _field_name == "os":
+                        _raw_val = record.get("Description")
+                    if _field_name == "location":
+                        _raw_val = record.get("GroupName")
+                    if _field_name == "ip":
+                        _raw_val = record.get("LocalIpAddresses")
+                    if _field_name == "hostname":
+                        _raw_val = record.get("Name")
+                    if _field_name == "tags":
+                        _raw_val = record.get("Tags")
+                    if _field_name == "manufacturer":
+                        _raw_val = record.get("Type")
+                    if _field_name == "mac_address":
+                        _raw_val = record.get("LocalIpAddresses")
+                    if _field_name == "type":
+                        _raw_val = record.get("AssetInfo")
+                    if _raw_val is not None:
+                        _val_str = str(_raw_val)[:100]
+                        field_details.append(f"{_field_name}={repr(_val_str)}")
+                    else:
+                        field_details.append(f"{_field_name}=None")
                 self.logger.warn(
-                    f"{self.log_prefix}: Skipping below fields"
-                    " due to invalid values. "
-                    f"Fields: '{', '.join(invalid_fields)}'."
+                    f"{self.log_prefix}: Skipping fields with invalid values: "
+                    f"{', '.join(field_details)}. "
+                    "Reason: empty, too short (<2 chars), or exceeds max length."
                 )
+
+            # Check if asset can be created (needs at least IP or MAC)
+            if not ip_address and not mac_address:
+                # Log the dropped record with identifier details
+                record_id = record.get("Identifier") or record.get("id") or record.get("Name") or "unknown"
+                self.logger.warn(
+                    f"{self.log_prefix}: Dropping record '{record_id}' - "
+                    "no valid IP address or MAC address available. "
+                    "No MAC field configured."
+                )
+                return None
+
             asset = Asset(
-                manufacturer=manufacturer or None,
+                category=category or None,
                 os_version=os_version or None,
                 os=os or None,
                 location=location or None,
-                source_id=source_id or None,
-                lastseen=lastseen or None,
                 ip=ip_address or None,
                 hostname=hostname or None,
-                type=device_type or None,
+                manufacturer=manufacturer or None,
                 mac_address=mac_address or None,
+                type=device_type or None,
                 use_asset=True,
             )
             if tags:
@@ -720,15 +818,8 @@ class KaseyaVSAPlugin(IotPluginBase):
                 "creating asset for record"
             )
             message = ""
-            if mac_address and source_id:
-                message = (
-                    f" with mac_address: {mac_address} "
-                    f"and source_id: {source_id}"
-                )
-            elif mac_address:
+            if mac_address:
                 message = f" with mac_address: {mac_address}"
-            elif source_id:
-                message = f" with source_id: {source_id}"
 
             self.logger.warn(
                 f"{error_message}{message}. "
@@ -786,10 +877,23 @@ class KaseyaVSAPlugin(IotPluginBase):
                 )
 
                 assets = []
+                raw_record_count = len(response.get("Data") or [])
+                dropped_count = 0
                 for record in response.get("Data") or []:
                     asset = self.get_assets(record)
                     if asset:
                         assets.append(asset)
+                    else:
+                        dropped_count += 1
+
+                # Log page statistics
+                if dropped_count > 0:
+                    self.logger.info(
+                        f"{self.log_prefix}: Page processed - "
+                        f"fetched: {raw_record_count}, "
+                        f"pushed: {len(assets)}, "
+                        f"dropped: {dropped_count}."
+                    )
 
                 if len(assets) < LIMIT:
                     is_last = True
