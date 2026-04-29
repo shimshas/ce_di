@@ -5,7 +5,6 @@ import time
 import traceback
 import ipaddress
 import requests
-from requests.auth import HTTPBasicAuth
 from datetime import datetime, timezone
 from requests.auth import HTTPBasicAuth
 from typing import Dict
@@ -808,8 +807,7 @@ class KaseyaVSAPlugin(IotPluginBase):
                     "This asset cannot be imported into DI (requires at least an IP or MAC). "
                     "It will be logged here but will not appear in the DI inventory or Non-Importable section. "
                     f"Raw IP field ('LocalIpAddresses'): {repr(str(record.get('LocalIpAddresses', ''))[:80])}. "
-                    f"Raw MAC field ('LocalIpAddresses'): {repr(str(record.get('LocalIpAddresses', ''))[:80])}.\n"
-                    f"  source_id (Identifier): {source_id or 'None'}"
+                    f"Raw MAC field ('LocalIpAddresses'): {repr(str(record.get('LocalIpAddresses', ''))[:80])}."
                 )
 
             asset = Asset(
