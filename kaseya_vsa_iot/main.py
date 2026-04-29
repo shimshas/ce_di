@@ -884,9 +884,16 @@ class KaseyaVSAPlugin(IotPluginBase):
         }
 
         is_first, is_last = True, False
+        _pending_page = None  # (assets, is_first_flag) - holds previous page until we know if next is empty
         # Track MAC addresses to detect duplicates across pages
         _seen_macs = {}
         _duplicate_macs = []
+        # Pull-level counters for end-of-pull summary
+        _total_fetched = 0
+        _total_pushed = 0
+        _total_dropped_all = 0
+        _total_no_ip_no_mac = 0
+        _page_num = 0
         headers = self._add_user_agent()
 
         while True:
@@ -906,10 +913,16 @@ class KaseyaVSAPlugin(IotPluginBase):
 
                 assets = []
                 raw_record_count = len(response.get("Data") or [])
+                _total_fetched += raw_record_count
                 dropped_count = 0
+                no_ip_no_mac_page = 0
                 for record in response.get("Data") or []:
                     asset = self.get_assets(record)
                     if asset:
+                        # Track non-importable assets (no IP or MAC)
+                        if not asset.ip and not asset.mac_address:
+                            no_ip_no_mac_page += 1
+                            _total_no_ip_no_mac += 1
                         # Check for duplicate MAC addresses
                         if asset.mac_address:
                             mac_lower = asset.mac_address.lower()
@@ -929,21 +942,89 @@ class KaseyaVSAPlugin(IotPluginBase):
                             else:
                                 _seen_macs[mac_lower] = asset.hostname or 'Unknown'
                         assets.append(asset)
+                        _total_pushed += 1
                     else:
                         dropped_count += 1
+                        _total_dropped_all += 1
 
-                # Log page statistics
-                if dropped_count > 0:
+                # Always log per-page stats so operator can see what happened
+                if raw_record_count > 0:
+                    _importable_page = len(assets) - no_ip_no_mac_page
                     self.logger.info(
-                        f"{self.log_prefix}: Page processed - "
-                        f"fetched: {raw_record_count}, "
-                        f"pushed: {len(assets)}, "
-                        f"dropped: {dropped_count}."
+                        f"{self.log_prefix}: Page {_page_num + 1} — "
+                        f"API records: {raw_record_count}, "
+                        f"sent to DI: {len(assets)} "
+                        f"({_importable_page} importable, "
+                        f"{no_ip_no_mac_page} non-importable: no IP/MAC), "
+                        f"skipped (error): {dropped_count}."
                     )
+                _page_num += 1
 
-                # Simple offset pagination - check if we got fewer records than LIMIT
-                if raw_record_count < LIMIT:
-                    # This is the last page (partial or empty)
+                # Pending-page offset pagination:
+                # Hold each page and only yield it once we know whether there is a next page.
+                # This prevents yielding an empty batch as the final is_last=True batch,
+                # which would cause the CE SDK to not commit the transaction to DI.
+                if raw_record_count == 0:
+                    # Empty page - the pending page (if any) was the last real one
+                    if _pending_page is not None:
+                        _pend_assets, _pend_is_first = _pending_page
+                        is_last = True
+                        if _duplicate_macs:
+                            self.logger.warn(
+                                f"{self.log_prefix}: Pull complete. Found {len(_duplicate_macs)} "
+                                f"duplicate MAC address(es). Total unique MACs: {len(_seen_macs)}. "
+                                "Duplicate devices will be overwritten in DI (last record wins)."
+                            )
+                        _importable_total = _total_pushed - _total_no_ip_no_mac
+                        self.logger.info(
+                            f"{self.log_prefix}: Pull summary — "
+                            f"API records fetched: {_total_fetched}, "
+                            f"sent to DI engine: {_total_pushed} "
+                            f"({_importable_total} importable, "
+                            f"{_total_no_ip_no_mac} non-importable: no valid IP or MAC), "
+                            f"skipped (error/validation): {_total_dropped_all}."
+                        )
+                        if _total_no_ip_no_mac > 0:
+                            self.logger.info(
+                                f"{self.log_prefix}: {_total_no_ip_no_mac} device(s) have no valid IP or MAC "
+                                "address. These will appear in the 'Non-Importable' section in DI "
+                                "and will NOT count toward the importable device total."
+                            )
+                        if _total_dropped_all > 0:
+                            self.logger.warn(
+                                f"{self.log_prefix}: {_total_dropped_all} record(s) were skipped entirely "
+                                "due to validation errors or exceptions during asset creation. "
+                                "Check the preceding warning messages for per-record details."
+                            )
+                        _importable_total = _total_pushed - _total_no_ip_no_mac
+                        self.logger.info(
+                            f"{self.log_prefix}: Handing off final batch to CE SDK — "
+                            f"{len(_pend_assets)} assets in this batch, "
+                            f"{_importable_total} importable total across all pages. "
+                            "CE SDK should now emit 'Successfully shared total' in CE logs. "
+                            "If that message does NOT appear, the failure is in the CE SDK "
+                            "transaction layer, not in this plugin."
+                        )
+                        yield _pend_assets, _pend_is_first, is_last, len(_pend_assets), 0
+                    elif is_first:
+                        # No data at all on any page
+                        is_last = True
+                        self.logger.info(
+                            f"{self.log_prefix}: Pull summary — "
+                            f"API returned 0 records. Nothing sent to DI."
+                        )
+                        self.logger.warn(
+                            f"{self.log_prefix}: No assets were fetched from the Kaseya VSA API. "
+                            "The 'Successfully shared total' message will NOT appear because "
+                            "there is nothing to share. Verify the API is returning data."
+                        )
+                        yield assets, True, is_last, 0, 0
+                    break
+                elif raw_record_count < LIMIT:
+                    # Partial last page - yield pending page first (if any), then this as last
+                    if _pending_page is not None:
+                        _pend_assets, _pend_is_first = _pending_page
+                        yield _pend_assets, _pend_is_first, False, len(_pend_assets), 0
                     is_last = True
                     if _duplicate_macs:
                         self.logger.warn(
@@ -951,11 +1032,45 @@ class KaseyaVSAPlugin(IotPluginBase):
                             f"duplicate MAC address(es). Total unique MACs: {len(_seen_macs)}. "
                             "Duplicate devices will be overwritten in DI (last record wins)."
                         )
-                    yield assets, is_first, is_last, len(assets), 0
+                    _importable_total = _total_pushed - _total_no_ip_no_mac
+                    self.logger.info(
+                        f"{self.log_prefix}: Pull summary — "
+                        f"API records fetched: {_total_fetched}, "
+                        f"sent to DI engine: {_total_pushed} "
+                        f"({_importable_total} importable, "
+                        f"{_total_no_ip_no_mac} non-importable: no valid IP or MAC), "
+                        f"skipped (error/validation): {_total_dropped_all}."
+                    )
+                    if _total_no_ip_no_mac > 0:
+                        self.logger.info(
+                            f"{self.log_prefix}: {_total_no_ip_no_mac} device(s) have no valid IP or MAC "
+                            "address. These will appear in the 'Non-Importable' section in DI "
+                            "and will NOT count toward the importable device total."
+                        )
+                    if _total_dropped_all > 0:
+                        self.logger.warn(
+                            f"{self.log_prefix}: {_total_dropped_all} record(s) were skipped entirely "
+                            "due to validation errors or exceptions during asset creation. "
+                            "Check the preceding warning messages for per-record details."
+                        )
+                    _importable_total = _total_pushed - _total_no_ip_no_mac
+                    self.logger.info(
+                        f"{self.log_prefix}: Handing off final batch to CE SDK — "
+                        f"{len(assets)} assets in this batch, "
+                        f"{_importable_total} importable total across all pages. "
+                        "CE SDK should now emit 'Successfully shared total' in CE logs. "
+                        "If that message does NOT appear, the failure is in the CE SDK "
+                        "transaction layer, not in this plugin."
+                    )
+                    _cur_is_first = is_first if _pending_page is None else False
+                    yield assets, _cur_is_first, is_last, len(assets), 0
                     break
                 else:
-                    # Got full page - more may exist
-                    yield assets, is_first, is_last, len(assets), 0
+                    # Full page - yield pending page (if any), store current as pending
+                    if _pending_page is not None:
+                        _pend_assets, _pend_is_first = _pending_page
+                        yield _pend_assets, _pend_is_first, False, len(_pend_assets), 0
+                    _pending_page = (assets, is_first)
                     is_first = False
                     params["$skip"] += LIMIT
 
