@@ -1008,9 +1008,7 @@ class KaseyaVSAPlugin(IotPluginBase):
                             f"{self.log_prefix}: Handing off final batch to CE SDK — "
                             f"{len(_pend_assets)} assets in this batch, "
                             f"{_importable_total} importable total across all pages. "
-                            "CE SDK should now emit 'Successfully shared total' in CE logs. "
-                            "If that message does NOT appear, the failure is in the CE SDK "
-                            "transaction layer, not in this plugin."
+                            
                         )
                         yield _pend_assets, _pend_is_first, is_last, len(_pend_assets), 0
                     elif is_first:
