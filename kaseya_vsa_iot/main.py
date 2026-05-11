@@ -715,35 +715,47 @@ class KaseyaVSAPlugin(IotPluginBase):
             if category:
                 category = self.validate_field("category", category, 32, invalid_fields)
 
-            # type
-            device_type = None
-            _type_info_raw = record.get("AssetInfo")
+            # type — top-level Type field (e.g. "windows", "mac")
+            device_type = self.validate_field(
+                "type",
+                record.get("Type"),
+                32,
+                invalid_fields,
+            )
+
+            # serial_number — from AssetInfo[BIOS].CategoryData['Serial Number']
+            serial_number = None
             try:
-                if isinstance(_type_info_raw, str) and _type_info_raw.startswith("["):
-                    import ast as _ast
-                    _type_info_raw = _ast.literal_eval(_type_info_raw)
-                if isinstance(_type_info_raw, list):
-                    # First, try to find the "System" category for device type
-                    for _entry in _type_info_raw:
-                        if isinstance(_entry, dict) and _entry.get("CategoryName") == "System":
-                            _cd = _entry.get("CategoryData") or {}
-                            _val = _cd.get("Type") if isinstance(_cd, dict) else None
-                            if _val:
-                                device_type = str(_val)
-                                break
-                    # Fallback: try any entry with the value
-                    if not device_type:
-                        for _entry in _type_info_raw:
-                            if isinstance(_entry, dict):
-                                _cd = _entry.get("CategoryData") or {}
-                                _val = _cd.get("Type") if isinstance(_cd, dict) else None
-                                if _val:
-                                    device_type = str(_val)
-                                    break
+                for _entry in (record.get("AssetInfo") or []):
+                    if isinstance(_entry, dict) and _entry.get("CategoryName") == "BIOS":
+                        _cd = _entry.get("CategoryData") or {}
+                        _val = _cd.get("Serial Number") if isinstance(_cd, dict) else None
+                        if _val:
+                            serial_number = str(_val)
+                            break
             except Exception:
                 pass
-            if device_type:
-                device_type = self.validate_field("type", device_type, 32, invalid_fields)
+            if serial_number:
+                serial_number = self.validate_field(
+                    "serial_number", serial_number, 128, invalid_fields
+                )
+
+            # model_name — from AssetInfo[System].CategoryData.Model
+            model_name = None
+            try:
+                for _entry in (record.get("AssetInfo") or []):
+                    if isinstance(_entry, dict) and _entry.get("CategoryName") == "System":
+                        _cd = _entry.get("CategoryData") or {}
+                        _val = _cd.get("Model") if isinstance(_cd, dict) else None
+                        if _val:
+                            model_name = str(_val)
+                            break
+            except Exception:
+                pass
+            if model_name:
+                model_name = self.validate_field(
+                    "model_name", model_name, 128, invalid_fields
+                )
 
             # location
             location = self.validate_field(
@@ -790,7 +802,17 @@ class KaseyaVSAPlugin(IotPluginBase):
                     elif _field_name == "category":
                         _raw_val = record.get("AssetInfo")
                     elif _field_name == "type":
-                        _raw_val = record.get("AssetInfo")
+                        _raw_val = record.get("Type")
+                    elif _field_name == "serial_number":
+                        for _e in (record.get("AssetInfo") or []):
+                            if isinstance(_e, dict) and _e.get("CategoryName") == "BIOS":
+                                _raw_val = (_e.get("CategoryData") or {}).get("Serial Number")
+                                break
+                    elif _field_name == "model_name":
+                        for _e in (record.get("AssetInfo") or []):
+                            if isinstance(_e, dict) and _e.get("CategoryName") == "System":
+                                _raw_val = (_e.get("CategoryData") or {}).get("Model")
+                                break
                     elif _field_name == "location":
                         _raw_val = record.get("GroupName")
                     elif _field_name == "source_id":
@@ -828,6 +850,8 @@ class KaseyaVSAPlugin(IotPluginBase):
                 type=device_type or None,
                 location=location or None,
                 source_id=source_id or None,
+                serial_number=serial_number or None,
+                model_name=model_name or None,
                 use_asset=True,
             )
             if tags:
